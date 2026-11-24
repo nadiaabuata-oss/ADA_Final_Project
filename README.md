@@ -41,8 +41,8 @@ The analysis accounts for NHANES subsample weights, strata, and primary sampling
 
 ## Repository Contents
 
-- `Analysis_cleaned.Rmd` — annotated R Markdown containing data preparation, analysis, statistical models, diagnostics, and figures.
-- `ADA-final-project.Rproj` — RStudio project configuration.
+- `Analysis_cleaned.Rmd` - annotated R Markdown containing data preparation, analysis, statistical models, diagnostics, and figures.
+- `ADA-final-project.Rproj` - RStudio project configuration.
 
 ## Reproducibility
 
