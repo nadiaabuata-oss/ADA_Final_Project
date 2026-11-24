@@ -1,6 +1,6 @@
 ---
 title: "Association between Urinary 3-PBA and Serum AMH"
-subtitle: "NHANES 2017–2018"
+subtitle: "NHANES 2017-2018"
 author: "Nadia Abu Ata"
 date: "Fall 2026"
 output: html_document
@@ -11,13 +11,15 @@ output: html_document
 
 This analysis uses NHANES 2017–2018 data to examine the association between urinary 3-PBA and serum AMH concentrations among women aged 20-44 years.
 
-```{r setup, message=FALSE}
+```{r}
 library(haven)
 library(survey)
+library(ggplot2)
+library(tidyr)
 ```
 
-## Download NHANES datasets
-```{r analysis-1}
+## Download NHANES datasets directly from website
+```{r}
 # NHANES 2017-2018 data location
 base <- "https://wwwn.cdc.gov/Nchs/Data/Nhanes/Public/2017/DataFiles/"
 
@@ -29,8 +31,7 @@ nhanes <- list(
   bmi = read_xpt(paste0(base, "BMX_J.xpt")),
   creatinine = read_xpt(paste0(base, "ALB_CR_J.xpt")),
   smoking = read_xpt(paste0(base, "SMQ_J.xpt")),
-  hormones = read_xpt(paste0(base, "RHQ_J.xpt"))
-)
+  hormones = read_xpt(paste0(base, "RHQ_J.xpt")))
 
 # Confirm which datasets loaded
 names(nhanes)
@@ -38,25 +39,23 @@ names(nhanes)
 
 # 2. Merge datasets and select variables
 
-The NHANES datasets will be merged using SEQN, the unique participant identifier. Only variables needed for the study will be retained.
+The NHANES datasets will be merged using SEQN, the unique participant identification number. Only variables needed for the study will be retained.
 
-```{r analysis-2}
+```{r}
 # Select demographic variables
 data <- nhanes$demo[, c(
   "SEQN", "RIAGENDR", "RIDAGEYR", "RIDEXPRG",
   "RIDRETH3", "DMDEDUC2", "INDFMPIR",
-  "SDMVSTRA", "SDMVPSU"
-)]
+  "SDMVSTRA", "SDMVPSU")]
 
 # Merge exposure and outcome
 data <- merge(data, nhanes$pba[, c("SEQN", "URXOPM", "WTSB2YR")],
               by = "SEQN", all.x = TRUE)
 
-
 data <- merge(data, nhanes$amh[, c("SEQN", "SSTAMH")],
               by = "SEQN", all.x = TRUE)
 
-# Merge potential confounders
+# Merge additional covariates and descriptive variables
 data <- merge(data, nhanes$bmi[, c("SEQN", "BMXBMI")],
               by = "SEQN", all.x = TRUE)
 
@@ -79,7 +78,7 @@ The study population consists of nonpregnant women aged 20-44 years with availab
 
 Women whose pregnancy status could not be ascertained are excluded along with those confirmed pregnant.
 
-```{r pregnancy-status}
+```{r}
 # Check pregnancy status among women aged 20–44
 table(
   data$RIDEXPRG[data$RIAGENDR == 2 &
@@ -87,8 +86,23 @@ table(
                   data$RIDAGEYR <= 44],
   useNA = "always")
 ```
-```{r analysis-3}
-# Count participants remaining after each criterion
+## Of the 9,254 NHANES participants, 1,110 were women aged 20-44 years. After restricting the sample to confirmed nonpregnant women, 966 remained. Of these, 253 had available measurements for both urinary 3-PBA and serum AMH and were included in the eligible study sample.
+
+```{r}
+# Define inclusion criteria step by step
+# Identify female participants (RIAGENDR = 2 means female)
+female <- data$RIAGENDR == 2
+
+# Among females, identify those aged 20 through 44 years (inclusive)
+age <- female & data$RIDAGEYR >= 20 & data$RIDAGEYR <= 44
+
+# Among females aged 20–44, identify those confirmed as not pregnant (RIDEXPRG = 2)
+nonpregnant <- age & data$RIDEXPRG == 2
+
+# Among eligible nonpregnant women, identify those with both biomarker measurements available
+biomarkers <- nonpregnant & !is.na(data$URXOPM) & !is.na(data$SSTAMH)
+
+# Count participants at each stage
 flow <- data.frame(
   Stage = c(
     "All NHANES participants",
@@ -99,20 +113,10 @@ flow <- data.frame(
   ),
   N = c(
     nrow(data),
-    sum(data$RIAGENDR == 2, na.rm = TRUE),
-    sum(data$RIAGENDR == 2 &
-        data$RIDAGEYR >= 20 &
-        data$RIDAGEYR <= 44, na.rm = TRUE),
-    sum(data$RIAGENDR == 2 &
-        data$RIDAGEYR >= 20 &
-        data$RIDAGEYR <= 44 &
-        data$RIDEXPRG == 2, na.rm = TRUE),
-    sum(data$RIAGENDR == 2 &
-        data$RIDAGEYR >= 20 &
-        data$RIDAGEYR <= 44 &
-        data$RIDEXPRG == 2 &
-        !is.na(data$URXOPM) &
-        !is.na(data$SSTAMH), na.rm = TRUE)))
+    sum(female, na.rm = TRUE),
+    sum(age, na.rm = TRUE),
+    sum(nonpregnant, na.rm = TRUE),
+    sum(biomarkers, na.rm = TRUE)))
 
 # Create the eligible study sample
 sample <- subset(
@@ -131,18 +135,19 @@ flow
 # 4. Assess missing data and variable coding
 
 Missing values are assessed among eligible participants before selecting covariates for regression models.
-```{r analysis-4}
+```{r}
 # Count missing values for each variable in the eligible sample
 colSums(is.na(sample))
 ```
+# Among the 253 eligible participants, income-to-poverty ratio (PIR) was missing for 30 women, BMI was missing for one woman, and birth control pill history was missing for 18 women. Because PIR was included as a covariate in the regression models, the primary regression analysis was restricted to 223 complete cases. BMI and birth control pill history were used for descriptive purposes only and were not included in the regression models.
+
 ## Check variable coding and biomarker distributions
 
-```{r analysis-5}
+```{r}
 # Examine response codes before recoding variables
 table(sample$SMQ020, useNA = "always")
 table(sample$RHQ420, useNA = "always")
 table(sample$DMDEDUC2, useNA = "always")
-
 
 # Summarize the exposure and outcome distributions
 summary(sample$URXOPM)
@@ -151,38 +156,40 @@ summary(sample$SSTAMH)
 # Check whether either variable contains zero or negative values
 sum(sample$URXOPM <= 0, na.rm = TRUE)
 sum(sample$SSTAMH <= 0, na.rm = TRUE)
-
 ```
-Among 253 women, urinary 3-PBA (µg/L) had an unweighted median of 0.75 (IQR 0.35–1.60), mean of 2.55, and maximum of 110. Serum AMH (ng/mL) had an unweighted median of 2.39 (IQR 1.07–4.07), mean of 2.89, and maximum of 22.29. Both distributions were right-skewed, and neither contained nonpositive values.
+# Among 253 women, urinary 3-PBA (µg/L) had an unweighted median of 0.75 (IQR 0.35–1.60), mean of 2.55, and maximum of 110. Serum AMH (ng/mL) had an unweighted median of 2.39 (IQR 1.07–4.07), mean of 2.89, and maximum of 22.29. Both distributions were right-skewed, and neither contained nonpositive values.
 
 
 ## Visualize biomarker distributions
 
-Histograms were used to examine the distributions of urinary 3-PBA and serum AMH before selecting transformations for regression analysis.
+Histograms were used to visually examine the distributions of urinary 3-PBA and serum AMH before selecting transformations for regression analysis.
 
 ```{r analysis-6}
 # Urinary 3-PBA distribution
-hist(sample$URXOPM,
-     breaks = 25,
-     col = "#4C78A8",
-     border = "white",
-     main = "Distribution of Urinary 3-PBA",
-     xlab = "Urinary 3-PBA (µg/L)")
+ggplot(sample, aes(x = URXOPM)) +
+  geom_histogram(bins = 25, fill = "#4C78A8", color = "white") +
+  labs(
+    title = "Distribution of Urinary 3-PBA",
+    x = "Urinary 3-PBA (µg/L)",
+    y = "Count"
+  ) +
+  theme_minimal()
 
 # Serum AMH distribution
-hist(sample$SSTAMH,
-     breaks = 25,
-     col = "#E08B65",
-     border = "white",
-     main = "Distribution of Serum AMH",
-     xlab = "Serum AMH (ng/mL)")
+ggplot(sample, aes(x = SSTAMH)) +
+  geom_histogram(bins = 25, fill = "#E08B65", color = "white") +
+  labs(
+    title = "Distribution of Serum AMH",
+    x = "Serum AMH (ng/mL)",
+    y = "Count"
+  ) +
+  theme_minimal()
 ```
 
 # 5. Specify NHANES survey design
 
 NHANES uses a complex, multistage sampling design. The analysis will account for environmental subsample weights, sampling strata, and primary sampling units (PSU).
-```{r analysis-7}
-
+```{r}
 # Check the laboratory subsample weights
 summary(sample$WTSB2YR)
 
@@ -192,7 +199,7 @@ sum(is.na(sample$WTSB2YR))
 # Count zero or negative weights
 sum(sample$WTSB2YR <= 0, na.rm = TRUE)
 ```
-```{r analysis-8}
+```{r}
 # Define the design among participants with valid lab weights
 design <- svydesign(
   ids = ~SDMVPSU,
@@ -201,7 +208,7 @@ design <- svydesign(
   nest = TRUE,
   data = subset(data, !is.na(WTSB2YR) & WTSB2YR > 0))
 
-# Restrict to our eligible study population
+# Restrict to eligible study population
 design <- subset(
   design,
   RIAGENDR == 2 &
@@ -216,12 +223,7 @@ nrow(design$variables)
 ```
 
 # 6. Generate Table 1 and descriptive statistics
-Table 1 describes the 253 eligible women with urinary 3-PBA
-and serum AMH measurements. Continuous characteristics are
-summarized using survey-weighted means or medians, and
-categorical characteristics using unweighted counts and
-survey-weighted percentages. Smoking and birth control pill
-history are descriptive variables, not regression covariates.
+Table 1 describes the 253 eligible women with urinary 3-PBA and serum AMH measurements. Continuous characteristics are summarized using survey-weighted means or medians, and categorical characteristics using unweighted counts and survey-weighted percentages. Smoking and birth control pill history are descriptive variables, not regression covariates.
 
 ```{r}
 # Format survey-weighted means and standard errors
@@ -241,8 +243,7 @@ median_iqr <- function(variable) {
     ci = FALSE
   )
   q <- as.numeric(coef(x))
-  sprintf("%.2f (%.2f–%.2f)", q[2], q[1], q[3])
-}
+  sprintf("%.2f (%.2f–%.2f)", q[2], q[1], q[3])}
 
 # Format unweighted count and survey-weighted percentage
 category_result <- function(variable, code) {
@@ -252,8 +253,7 @@ category_result <- function(variable, code) {
   )
   pct <- 100 * as.numeric(weighted[as.character(code)]) /
     sum(weighted)
-  sprintf("%d (%.1f%%)", n, pct)
-}
+  sprintf("%d (%.1f%%)", n, pct)}
 
 # Race/ethnicity categories in NHANES
 race_codes <- c(1, 2, 3, 4, 6, 7)
@@ -263,8 +263,7 @@ race_labels <- c(
   "  Non-Hispanic White",
   "  Non-Hispanic Black",
   "  Non-Hispanic Asian",
-  "  Other / Multiracial"
-)
+  "  Other / Multiracial")
 
 # Education categories in NHANES
 education_codes <- 1:5
@@ -273,8 +272,7 @@ education_labels <- c(
   "  9th–11th grade",
   "  High school graduate / GED",
   "  Some college / Associate degree",
-  "  College graduate or above"
-)
+  "  College graduate or above")
 
 # Assemble Table 1
 table1 <- data.frame(
@@ -321,29 +319,24 @@ knitr::kable(
 
 An unweighted scatterplot was used to examine the relationship between urinary 3-PBA and serum AMH among the 253 eligible participants. Because urinary 3-PBA was right-skewed, it was natural-log transformed to improve visualization and match the exposure transformation used in the regression models. Serum AMH was retained on its original scale (ng/mL) for interpretation.
 
-```{r scatterplot-log-pba}
-# Log-transformed 3-PBA versus original-scale AMH
-plot(
-  log(sample$URXOPM), sample$SSTAMH,
-  pch = 16,
-  col = adjustcolor("#4C78A8", alpha.f = 0.5),
-  xlab = "Natural log of urinary 3-PBA (µg/L)",
-  ylab = "Serum AMH (ng/mL)",
-  main = "Log urinary 3-PBA and serum AMH"
-)
+```{r}
+ggplot(sample, aes(x = log(URXOPM), y = SSTAMH)) +
+  geom_point(color = "#4C78A8", alpha = 0.5) +
+  labs(
+    title = "Log urinary 3-PBA and serum AMH",
+    x = "log (urinary 3-PBA)",
+    y = "Serum AMH (ng/mL)"
+  ) +
+  theme_minimal()
 ```
 
 The scatterplot shows substantial variability in serum AMH across log-transformed urinary 3-PBA concentrations, without a clear visual linear relationship. Several observations have relatively high AMH concentrations, which will be considered during regression diagnostics.
 
 ## 8. Urine-dilution-adjusted and multivariable regression models
 
-I fitted survey-weighted linear regression models to evaluate the association between urinary 3-PBA and serum AMH. Urinary 3-PBA was natural-log-transformed because of its right-skewed distribution.
+I fitted two survey-weighted linear regression models to examine the association between natural-log-transformed urinary 3-PBA and serum AMH. The first adjusted for urinary creatinine, while the primary model additionally adjusted for age and family income-to-poverty ratio (PIR), guided by the literature-informed DAG. Both models used the same complete-case sample and accounted for NHANES environmental subsample weights, strata, and primary sampling units.
 
-The first model included urinary 3-PBA and urinary creatinine (urine-dilution-adjusted model). The primary multivariable model additionally adjusted for age and family income-to-poverty ratio (PIR), based on the literature-informed DAG. Both models use the same complete-case sample.
-
-Both models used the NHANES environmental subsample weights, strata, and primary sampling units.
-
-```{r regression-models}
+```{r}
 # Create log-transformed urinary 3-PBA within the survey design
 design <- update(design, log_pba = log(URXOPM))
 
@@ -370,265 +363,175 @@ confint(model_adjusted)["log_pba", ]
 # Check the sample size used in both models
 nrow(design_models$variables)
 ```
+# In the urinary creatinine-adjusted model, the association between natural-log-transformed urinary 3-PBA and serum AMH was negative but not statistically significant (β = −0.098; p = 0.569). After additional adjustment for age and income-to-poverty ratio, the estimated association remained negative and statistically nonsignificant (β = −0.046; 95% CI: −0.376 to 0.283; p = 0.763). Age was negatively associated with serum AMH in the primary adjusted model (β = −0.152; p = 0.003). These findings did not provide statistically significant evidence of an association between urinary 3-PBA and serum AMH in this sample.
+
 ## 9. Effect modification by age
 
-I examined whether age modified the association between urinary 3-PBA and serum AMH by including an interaction term between log-transformed 3-PBA and age in the survey-weighted adjusted model.
+I examined whether age modified the association between urinary 3-PBA and serum AMH by including an interaction term between log-transformed 3-PBA and continuous age in the survey-weighted adjusted model. Statistical significance of the interaction was assessed using the survey-design-adjusted Wald t-test.
 
-```{r age-interaction}
-# Center age at 30 years for easier interpretation
-design_models <- update(
-  design_models,
-  age_centered = RIDAGEYR - 30)
-
-# Fit the adjusted model with an age-by-3-PBA interaction
+```{r}
+# Test whether age modifies the association
 model_interaction <- svyglm(
-  SSTAMH ~ log_pba * age_centered + URXUCR + INDFMPIR,
+  SSTAMH ~ log_pba * RIDAGEYR + URXUCR + INDFMPIR,
   design = design_models)
 
-# Display the results
+# View the regression results
 summary(model_interaction)
 
-
-confint(model_interaction)["log_pba:age_centered", ]
+# Confidence interval for the interaction
+confint(model_interaction)["log_pba:RIDAGEYR", ]
 ```
+# The interaction between natural-log-transformed urinary 3-PBA and continuous age was not statistically significant (β = −0.0018; 95% CI: −0.0376 to 0.0341; p = 0.915). This analysis did not provide statistical evidence that age modified the association between urinary 3-PBA and serum AMH among women aged 20–44 years.
 
-The following figure shows model-predicted AMH at ages 20, 30, and 40, holding urinary creatinine and PIR at their sample medians. The plotted exposure range is 0.1–10 µg/L for readability; these are model predictions, not age-group averages.
 
-```{r age-interaction-figure}
-# Create a grid of exposure values and selected ages
-prediction_data <- expand.grid(
-  URXOPM = exp(seq(log(0.1), log(10), length.out = 100)),
-  RIDAGEYR = c(20, 30, 40))
-
-# Match the predictors used in the interaction model
-prediction_data$log_pba <- log(prediction_data$URXOPM)
-prediction_data$age_centered <- prediction_data$RIDAGEYR - 30
-
-# Hold other covariates constant at their sample medians
-prediction_data$URXUCR <- median(design_models$variables$URXUCR)
-prediction_data$INDFMPIR <- median(design_models$variables$INDFMPIR)
-
-# Calculate predicted AMH from the fitted interaction model
-prediction_data$predicted_amh <- predict(
-  model_interaction,
-  newdata = prediction_data,
-  type = "response")
-
-# Plot age-specific predicted relationships
-par(mar = c(5, 5, 4, 9), xpd = TRUE)
-plot(
-  NA,
-  xlim = range(prediction_data$URXOPM),
-  ylim = range(prediction_data$predicted_amh),
-  log = "x",
-  xlab = "Urinary 3-PBA (µg/L, log scale)",
-  ylab = "Predicted serum AMH (ng/mL)",
-  main = "Predicted 3-PBA–AMH association by age")
-
-age_colors <- c("#4C78A8", "#F58518", "#54A24B")
-
-for (i in seq_along(c(20, 30, 40))) {
-  age <- c(20, 30, 40)[i]
-  d <- subset(prediction_data, RIDAGEYR == age)
-
-  lines(
-    d$URXOPM,
-    d$predicted_amh,
-    col = age_colors[i],
-    lwd = 2)}
-
-legend(
-  "topright",
-  inset = c(-0.28, 0),
-  legend = c("Age 20", "Age 30", "Age 40"),
-  col = age_colors,
-  lwd = 2,
-  bty = "n")
-
-# Restore default plotting settings
-par(mar = c(5, 4, 4, 2) + 0.1, xpd = FALSE)
-```
 ## 10. Regression diagnostics
 ### 10.1 Residuals versus fitted values
-```{r residuals-fitted}
-# Extract fitted values and residuals from the adjusted model
-plot(
-  fitted(model_adjusted),
-  residuals(model_adjusted),
-  pch = 16,
-  col = adjustcolor("#4C78A8", alpha.f = 0.5),
-  xlab = "Fitted serum AMH (ng/mL)",
-  ylab = "Residuals (ng/mL)",
-  main = "Residuals versus fitted values"
-)
+```{r}
+diagnostic_data <- data.frame(
+  fitted = fitted(model_adjusted),
+  residuals = residuals(model_adjusted))
 
-# Reference line for zero residual
-abline(h = 0, col = "#E45756", lwd = 2, lty = 2)
+ggplot(diagnostic_data, aes(x = fitted, y = residuals)) +
+  geom_point(color = "#4C78A8", alpha = 0.5) +
+  geom_hline(yintercept = 0, color = "#E45756",
+             linewidth = 1, linetype = "dashed") +
+  labs(
+    title = "Residuals versus fitted values",
+    x = "Fitted serum AMH (ng/mL)",
+    y = "Residuals (ng/mL)"
+  ) +
+  theme_minimal()
 ```
+The residuals-versus-fitted plot shows a funnel-shaped pattern, with residual variability increasing at higher fitted AMH values, suggesting a violation of the constant variance assumption (heteroscedasticity) in the linear regression model.
 
 ### 10.2 Normal Q–Q plot
-
-```{r residuals-qq}
-qqnorm(
-  residuals(model_adjusted),
-  pch = 16,
-  col = adjustcolor("#4C78A8", alpha.f = 0.5),
-  main = "Normal Q-Q plot of adjusted model residuals"
-)
-
-qqline(
-  residuals(model_adjusted),
-  col = "#E45756",
-  lwd = 2
-)
+```{r}
+ggplot(
+  data.frame(residuals = residuals(model_adjusted)),
+  aes(sample = residuals)
+) +
+  stat_qq(color = "#4C78A8", alpha = 0.5) +
+  stat_qq_line(color = "#E45756", linewidth = 1) +
+  labs(
+    title = "Normal Q-Q plot of adjusted model residuals",
+    x = "Theoretical quantiles",
+    y = "Sample quantiles"
+  ) +
+  theme_minimal()
 ```
-
-The original-scale model showed a pronounced upper residual tail and evidence of nonconstant residual spread. These findings are documented as limitations; the primary outcome remains AMH in ng/mL for direct interpretation.
+The normal Q–Q plot shows substantial deviations from the reference line in the upper tail, suggesting a violation of the normality assumption, with right-skewed residuals and several large positive outliers.
 
 ### 10.3 Residuals versus continuous predictors
 
-```{r residuals-predictors}
-# Check residual patterns against continuous predictors
-par(mfrow = c(1, 2))
-
-plot(
-  design_models$variables$log_pba,
-  residuals(model_adjusted),
-  pch = 16,
-  col = adjustcolor("#4C78A8", alpha.f = 0.5),
-  xlab = "Log urinary 3-PBA",
-  ylab = "Residuals (ng/mL)",
-  main = "Residuals vs. log 3-PBA"
+```{r}
+# Extract variables used in the fitted model
+diagnostic_data2 <- data.frame(
+  log_pba = model.frame(model_adjusted)$log_pba,
+  age = model.frame(model_adjusted)$RIDAGEYR,
+  residuals = residuals(model_adjusted)
 )
-abline(h = 0, col = "#E45756", lty = 2)
 
-plot(
-  design_models$variables$RIDAGEYR,
-  residuals(model_adjusted),
-  pch = 16,
-  col = adjustcolor("#4C78A8", alpha.f = 0.5),
-  xlab = "Age (years)",
-  ylab = "Residuals (ng/mL)",
-  main = "Residuals vs. age"
+# Reshape the data for plotting
+diagnostic_long <- tidyr::pivot_longer(
+  diagnostic_data2,
+  cols = c(log_pba, age),
+  names_to = "variable",
+  values_to = "value"
 )
-abline(h = 0, col = "#E45756", lty = 2)
 
-par(mfrow = c(1, 1))
+ggplot(diagnostic_long, aes(x = value, y = residuals)) +
+  geom_point(color = "#4C78A8", alpha = 0.5) +
+  geom_hline(
+    yintercept = 0,
+    color = "#E45756",
+    linetype = "dashed"
+  ) +
+  facet_wrap(~ variable, scales = "free_x") +
+  labs(
+    title = "Residuals versus model predictors",
+    x = "Predictor value",
+    y = "Residuals (ng/mL)"
+  ) +
+  theme_minimal()
 ```
+Residuals plotted against age and log-transformed urinary 3-PBA showed no clear systematic patterns, although several large positive residuals were observed.
 
 ### 10.4 Approximate influence screening
 
-Cook’s distance and DFBETAs are calculated from an auxiliary sampling-weighted linear model with the same formula. These are screening diagnostics, not fully survey-design-based influence measures. Screening thresholds are not deletion rules.
+# Cook’s distance and DFBETAs
 
-```{r cooks-distance}
-# Auxiliary model for approximate influence screening
+```{r}
+# Weighted linear model for influence screening
 diagnostic_model <- lm(
   SSTAMH ~ log_pba + URXUCR + RIDAGEYR + INDFMPIR,
   data = design_models$variables,
-  weights = WTSB2YR
-)
+  weights = WTSB2YR)
 
-# Calculate Cook's distance
+# Cook's distance
 cooks <- cooks.distance(diagnostic_model)
 
-plot(
-  cooks,
-  type = "h",
-  col = "#4C78A8",
-  lwd = 2,
-  xlab = "Observation index",
-  ylab = "Cook's distance",
-  main = "Cook's distance: influence screening"
-)
-
-abline(
-  h = 4 / length(cooks),
-  col = "#E45756",
-  lty = 2,
-  lwd = 2
-)
-
-
-# Display the 10 largest Cook's distances
-head(sort(cooks, decreasing = TRUE), 10)
-
-# Count observations above the screening threshold
-sum(cooks > 4 / length(cooks))
-```
-```{r pba-dfbetas}
-# DFBETAs for the urinary 3-PBA coefficient
+# DFBETAs for the 3-PBA coefficient
 pba_dfbetas <- dfbetas(diagnostic_model)[, "log_pba"]
 
-# Display the 10 largest absolute values
-head(sort(abs(pba_dfbetas), decreasing = TRUE), 10)
+# Identify potentially influential observations
+influential <- which(
+  abs(pba_dfbetas) > 2 / sqrt(length(pba_dfbetas)))
 
-# Conventional screening threshold
-2 / sqrt(length(pba_dfbetas))
+# Number of flagged observations
+length(influential)
 ```
-```{r influential-observations}
-# Identify observations exceeding the DFBETA threshold
-influential <- which(abs(pba_dfbetas) > 2 / sqrt(length(pba_dfbetas)))
 
-# Display their exposure, outcome, and relevant covariates
-design_models$variables[influential,
-  c("SEQN", "URXOPM", "SSTAMH", "RIDAGEYR", "URXUCR", "INDFMPIR", "WTSB2YR")
-]
-```
 
 ### 10.5 Exploratory influence sensitivity check
 
-The primary analysis retains all eligible observations. The following exploratory comparison assesses how the exposure coefficient changes when the eight observations flagged by the auxiliary DFBETA screen are temporarily excluded.
+The primary analysis retains all eligible observations. The following exploratory comparison assesses how the exposure coefficient changes when the eight observations flagged by the additional DFBETA screen are temporarily excluded.
 
-```{r influence-sensitivity}
-# Compare the primary exposure coefficient with a sensitivity estimate
-# excluding the eight observations flagged by DFBETAs
+```{r}
+# Identify the participants flagged by DFBETAs
+flagged_ids <- design_models$variables$SEQN[influential]
 
+# Fit the sensitivity model excluding flagged participants
+model_sensitivity <- svyglm(
+  SSTAMH ~ log_pba + URXUCR + RIDAGEYR + INDFMPIR,
+  design = subset(design_models, !(SEQN %in% flagged_ids)))
+
+# View regression results
+summary(model_sensitivity)
+
+# Compare the 3-PBA coefficients
 coef(model_adjusted)["log_pba"]
+coef(model_sensitivity)["log_pba"]
 
-coef(
-  svyglm(
-    SSTAMH ~ log_pba + URXUCR + RIDAGEYR + INDFMPIR,
-    design = subset(
-      design_models,
-      !(SEQN %in% design_models$variables$SEQN[influential])
-    )
-  )
-)["log_pba"]
-
-confint(
-  svyglm(
-    SSTAMH ~ log_pba + URXUCR + RIDAGEYR + INDFMPIR,
-    design = subset(
-      design_models,
-      !(SEQN %in% design_models$variables$SEQN[influential])
-    )
-  )
-)["log_pba", ]
+# Confidence interval for the sensitivity estimate
+confint(model_sensitivity)["log_pba", ]
 ```
-
-
-The primary adjusted exposure coefficient was −0.0463 (223 participants); the exploratory exclusion estimate was −0.0971 (215 participants). The magnitude changed, but both estimates were negative. The screening method and sensitivity comparison do not establish that the excluded observations were erroneous.
+# After excluding the eight potentially influential observations, the estimated association between urinary 3-PBA and serum AMH became somewhat more negative (β = −0.097; 95% CI: −0.293 - 0.099; p = 0.298). However, the association remained statistically nonsignificant. Therefore, this exploratory sensitivity analysis did not change the overall conclusion of the primary analysis.
 
 ## 11. Sensitivity analysis: Race/ethnicity adjustment
 
-We conducted a sensitivity analysis additionally adjusting for
-race/ethnicity to assess whether the estimated association between
-urinary 3-PBA and serum AMH was sensitive to this adjustment.
-Race/ethnicity was treated as a categorical variable.
+I conducted a sensitivity analysis additionally adjusting for race/ethnicity to assess whether the estimated association between urinary 3-PBA and serum AMH was sensitive to this adjustment. Race/ethnicity was treated as a categorical variable.
 
 ```{r}
-# Fit sensitivity model with race/ethnicity adjustment
+# Fit sensitivity model with additional race/ethnicity adjustment
 model_ethnicity <- svyglm(
   SSTAMH ~ log_pba + URXUCR + RIDAGEYR + INDFMPIR +
     factor(RIDRETH3),
-  design = design_models
-)
+  design = design_models)
 
-# Compare exposure coefficients and confidence intervals
+# View the full regression results
+summary(model_ethnicity)
+
+# Compare the 3-PBA coefficients
 coef(model_adjusted)["log_pba"]
-confint(model_adjusted)["log_pba", ]
-
 coef(model_ethnicity)["log_pba"]
+
+# Confidence interval for the sensitivity estimate
 confint(model_ethnicity)["log_pba", ]
 ```
+# After additional adjustment for race/ethnicity, the estimated association between urinary 3-PBA and serum AMH remained negative and statistically nonsignificant (β = −0.022; 95% CI: −0.419 - 0.376; p = 0.899). 
 
+
+## 12. Conclusion
+# In this cross-sectional analysis of NHANES 2017-2018 data, urinary 3-PBA was not significantly associated with serum AMH among nonpregnant women aged 20-44 years after adjustment for urinary creatinine, age, and income-to-poverty ratio. There was no statistically significant evidence of effect modification by age, and sensitivity analyses did not change the overall conclusion.
+
+# These findings should be interpreted cautiously because of the cross-sectional study design, relatively small regression sample, and limitations identified during regression diagnostics. Future longitudinal studies may help clarify the relationship between pyrethroid exposure and ovarian reserve.
